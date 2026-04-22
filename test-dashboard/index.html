@@ -155,7 +155,7 @@
     </div>
 
     <div class="card accent-tbond">
-      <div class="card-label">10-Year Treasury <span class="card-ticker">DGS10</span></div>
+      <div class="card-label">10-Year Treasury <span class="card-ticker">^TNX</span></div>
       <div class="card-value loading" id="val-treasury">—</div>
       <span class="card-unit" id="unit-treasury">%</span>
     </div>
@@ -167,26 +167,40 @@
   </footer>
 
   <script>
-    const fields = {
-      gold:         { el: "val-gold",     fmt: v => v.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2}) },
-      oil:          { el: "val-oil",      fmt: v => v.toFixed(2) },
-      sp500:        { el: "val-sp500",    fmt: v => v.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2}) },
-      treasury_10y: { el: "val-treasury", fmt: v => v.toFixed(3) },
+    // Yahoo Finance symbols mapped to their card config
+    const SYMBOLS = {
+      "GC=F":  { el: "val-gold",     fmt: v => v.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2}) },
+      "CL=F":  { el: "val-oil",      fmt: v => v.toFixed(2) },
+      "^GSPC": { el: "val-sp500",    fmt: v => v.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2}) },
+      "^TNX":  { el: "val-treasury", fmt: v => v.toFixed(3) },
     };
 
     async function fetchPrices() {
       const dot = document.getElementById("status-dot");
       const ts  = document.getElementById("last-updated");
-      try {
-        const res  = await fetch("/api/prices");
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
 
-        for (const [key, cfg] of Object.entries(fields)) {
+      const symbolList = Object.keys(SYMBOLS).join(",");
+      const yahooUrl   = "https://query1.finance.yahoo.com/v7/finance/quote?symbols=" + encodeURIComponent(symbolList);
+      const proxyUrl   = "https://api.allorigins.win/get?url=" + encodeURIComponent(yahooUrl);
+
+      try {
+        const res = await fetch(proxyUrl);
+        if (!res.ok) throw new Error("Proxy HTTP " + res.status);
+
+        const wrapper = await res.json();
+        if (!wrapper.contents) throw new Error("Empty proxy response");
+
+        const data    = JSON.parse(wrapper.contents);
+        const results = data?.quoteResponse?.result ?? [];
+        if (results.length === 0) throw new Error("No quotes returned");
+
+        for (const quote of results) {
+          const cfg = SYMBOLS[quote.symbol];
+          if (!cfg) continue;
           const el  = document.getElementById(cfg.el);
-          const val = data[key]?.value;
+          const val = quote.regularMarketPrice;
           el.classList.remove("loading", "error");
-          if (val !== null && val !== undefined) {
+          if (val != null) {
             el.textContent = cfg.fmt(val);
           } else {
             el.textContent = "N/A";
@@ -194,10 +208,10 @@
           }
         }
 
-        dot.className = "";
+        dot.className  = "";
         ts.textContent = "Last updated: " + new Date().toLocaleTimeString();
       } catch (err) {
-        dot.className = "error";
+        dot.className  = "error";
         ts.textContent = "Update failed — retrying in 30s";
         console.error("Fetch error:", err);
       }
