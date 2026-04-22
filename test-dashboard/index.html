@@ -152,16 +152,16 @@
     </div>
 
     <div class="card accent-oil">
-      <div class="card-label">WTI Crude Oil <span class="card-ticker">X:WTIUSD</span></div>
+      <div class="card-label">WTI Oil (USO) <span class="card-ticker">USO</span></div>
       <div class="card-value loading" id="val-oil">—</div>
-      <span class="card-unit" id="unit-oil">USD / bbl</span>
+      <span class="card-unit" id="unit-oil">USD</span>
       <span class="card-sublabel">Prev Close &middot; Polygon.io</span>
     </div>
 
     <div class="card accent-sp500">
-      <div class="card-label">S&amp;P 500 <span class="card-ticker">I:SPX</span></div>
+      <div class="card-label">S&amp;P 500 (SPY) <span class="card-ticker">SPY</span></div>
       <div class="card-value loading" id="val-sp500">—</div>
-      <span class="card-unit" id="unit-sp500">points</span>
+      <span class="card-unit" id="unit-sp500">USD</span>
       <span class="card-sublabel">Prev Close &middot; Polygon.io</span>
     </div>
 
@@ -185,8 +185,8 @@
     // Polygon prev-close tickers and their card config
     const POLYGON_TICKERS = [
       { ticker: "C:XAUUSD", el: "val-gold",  fmt: v => v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
-      { ticker: "X:WTIUSD", el: "val-oil",   fmt: v => v.toFixed(2) },
-      { ticker: "I:SPX",    el: "val-sp500", fmt: v => v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
+      { ticker: "USO",       el: "val-oil",   fmt: v => v.toFixed(2) },
+      { ticker: "SPY",       el: "val-sp500", fmt: v => v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
     ];
 
     function setCardValue(elId, value, formatter) {
