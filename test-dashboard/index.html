@@ -166,10 +166,10 @@
     </div>
 
     <div class="card accent-tbond">
-      <div class="card-label">10-Year Treasury <span class="card-ticker">DGS10</span></div>
+      <div class="card-label">10Y Treasury (IEF) <span class="card-ticker">IEF</span></div>
       <div class="card-value loading" id="val-treasury">—</div>
-      <span class="card-unit" id="unit-treasury">%</span>
-      <span class="card-sublabel">Latest &middot; FRED</span>
+      <span class="card-unit" id="unit-treasury">USD</span>
+      <span class="card-sublabel">Prev Close &middot; Polygon.io</span>
     </div>
   </div>
 
@@ -180,13 +180,13 @@
 
   <script>
     const POLYGON_KEY = "EJ51XH2NlNM3dLUQPCkneX6JMw709fSp";
-    const FRED_KEY    = "34fddfadaed11617796a15067ab6d9d2";
 
     // Polygon prev-close tickers and their card config
     const POLYGON_TICKERS = [
-      { ticker: "C:XAUUSD", el: "val-gold",  fmt: v => v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
-      { ticker: "USO",       el: "val-oil",   fmt: v => v.toFixed(2) },
-      { ticker: "SPY",       el: "val-sp500", fmt: v => v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
+      { ticker: "C:XAUUSD", el: "val-gold",     fmt: v => v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
+      { ticker: "USO",       el: "val-oil",      fmt: v => v.toFixed(2) },
+      { ticker: "SPY",       el: "val-sp500",    fmt: v => v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
+      { ticker: "IEF",       el: "val-treasury", fmt: v => v.toFixed(2) },
     ];
 
     function setCardValue(elId, value, formatter) {
@@ -217,16 +217,6 @@
       return result.c; // closing price
     }
 
-    async function fetchFredLatest() {
-      const url = `https://api.stlouisfed.org/fred/series/observations?series_id=DGS10&api_key=${FRED_KEY}&sort_order=desc&limit=1&file_type=json`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      const obs = data?.observations?.[0];
-      if (!obs || obs.value === ".") throw new Error("No observation");
-      return parseFloat(obs.value);
-    }
-
     async function fetchPrices() {
       const dot = document.getElementById("status-dot");
       const ts  = document.getElementById("last-updated");
@@ -239,8 +229,6 @@
         )
       );
 
-      const fredResult = await Promise.allSettled([fetchFredLatest()]);
-
       let anyError = false;
 
       for (const result of polygonResults) {
@@ -248,20 +236,11 @@
           const { cfg, val } = result.value;
           setCardValue(cfg.el, val, cfg.fmt);
         } else {
-          // Determine which card failed based on index
           const idx = polygonResults.indexOf(result);
           setCardError(POLYGON_TICKERS[idx].el, "Unavailable");
           console.error(`Polygon fetch failed for ${POLYGON_TICKERS[idx].ticker}:`, result.reason);
           anyError = true;
         }
-      }
-
-      if (fredResult[0].status === "fulfilled") {
-        setCardValue("val-treasury", fredResult[0].value, v => v.toFixed(3));
-      } else {
-        setCardError("val-treasury", "Unavailable");
-        console.error("FRED fetch failed:", fredResult[0].reason);
-        anyError = true;
       }
 
       dot.className  = anyError ? "error" : "";
