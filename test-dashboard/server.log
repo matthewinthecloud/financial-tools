@@ -6,3 +6,27 @@
  * Running on http://127.0.0.1:5001
 [33mPress CTRL+C to quit[0m
 127.0.0.1 - - [22/Apr/2026 12:45:36] "GET /api/prices HTTP/1.1" 200 -
+127.0.0.1 - - [22/Apr/2026 12:47:00] code 400, message Bad request version ('Âÿâ·ÅP);vÖ\x01:s\x95\x95\x8d2Á$ô0\x06/Qàúµ\x82,ì\x8dw\x00*')
+127.0.0.1 - - [22/Apr/2026 12:47:00] "[35m[1m\x16\x03\x01\x05÷\x01\x00\x05ó\x03\x037?×â\x80æùà a*2DáÀ.£J\x9a+¶ä°0ä@oO\x8dÔþ! Âÿâ·ÅP);vÖ\x01:s\x95\x95\x8d2Á$ô0\x06/Qàúµ\x82,ì\x8dw\x00*[0m" HTTPStatus.BAD_REQUEST -
+127.0.0.1 - - [22/Apr/2026 12:47:00] code 400, message Bad HTTP/0.9 request type ('\x16\x03\x01\x05÷\x01\x00\x05ó\x03\x03È´+\x02lr%\x12\x81ð$Ã\x11^\x8dÁÜÃÓ°òÝÈ\x06\x96ru/\x1aÇ\x19¼')
+127.0.0.1 - - [22/Apr/2026 12:47:00] "[35m[1m\x16\x03\x01\x05÷\x01\x00\x05ó\x03\x03È´+\x02lr%\x12\x81ð$Ã\x11^\x8dÁÜÃÓ°òÝÈ\x06\x96ru/\x1aÇ\x19¼ ×úúû\x18\x1að\x18\x08¿\x16mU\x94O·CeÖ&æ\x16\x03\x90\x18\x88ö5H/tî\x00*::\x13\x02\x13\x03\x13\x01À,À+Ì©À0À/Ì¨À[0m" HTTPStatus.BAD_REQUEST -
+127.0.0.1 - - [22/Apr/2026 12:47:00] code 400, message Bad request version ('Ýu\x19HZñ')
+127.0.0.1 - - [22/Apr/2026 12:47:00] "[35m[1m\x16\x03\x01\x05÷\x01\x00\x05ó\x03\x03\x9e°\x18/\x8aô\x03¬Þ\x16µ6É\x82\x88\x0bñYß\x1f®@n\x85Ýu\x19HZñ[0m" HTTPStatus.BAD_REQUEST -
+127.0.0.1 - - [22/Apr/2026 12:47:00] code 400, message Bad request version ('ÆU\x00***\x13\x02\x13\x03\x13\x01À,À+Ì©À0À/Ì¨À')
+127.0.0.1 - - [22/Apr/2026 12:47:00] "[35m[1m\x16\x03\x01\x05÷\x01\x00\x05ó\x03\x03\x87JÝ¯ñoYú9Á¿p25Ä\x89\x01\x04\x15\x8eìFâ¥zkb\x04Ñ-\x16^ FI\x17¾¡E¯\x12&\x9a]\x0d\x9cM»²÷ìg;ãs\x9bT'ýî\x06ÿ ÆU\x00***\x13\x02\x13\x03\x13\x01À,À+Ì©À0À/Ì¨À[0m" HTTPStatus.BAD_REQUEST -
+127.0.0.1 - - [22/Apr/2026 12:47:00] code 400, message Bad request version ('\x05æÍk·PwÊ\x07\x00*\x9a\x9a\x13\x02\x13\x03\x13\x01À,À+Ì©À0À/Ì¨À')
+127.0.0.1 - - [22/Apr/2026 12:47:00] "[35m[1m\x16\x03\x01\x05÷\x01\x00\x05ó\x03\x03\x8ay~\x9dD·)r`NmV\x0cdV£1$\x9c®PS\x84X},\x8cM}ñÚ# ôà\x97úb\x93F\x068\x17\x16\x82ëÈ\x9fê\x05!\x0d/sm\x1e\x05æÍk·PwÊ\x07\x00*\x9a\x9a\x13\x02\x13\x03\x13\x01À,À+Ì©À0À/Ì¨À[0m" HTTPStatus.BAD_REQUEST -
+127.0.0.1 - - [22/Apr/2026 12:47:00] code 400, message Bad request version ('yäß¯ê\x05~æØ)a²3ô\x8fÐÃ®ægBKâ$#\x16D\x04z7\x02\x19\x00*\x9a\x9a\x13\x02\x13\x03\x13\x01À,À+Ì©À0À/Ì¨À')
+127.0.0.1 - - [22/Apr/2026 12:47:00] "[35m[1m\x16\x03\x01\x05÷\x01\x00\x05ó\x03\x03»-\x8fª\x92³\x19ï¸û¤"PáDî\x92\x142¨)r(2\x9b\x1c©Ãü\x87³\x92 yäß¯ê\x05~æØ)a²3ô\x8fÐÃ®ægBKâ$#\x16D\x04z7\x02\x19\x00*\x9a\x9a\x13\x02\x13\x03\x13\x01À,À+Ì©À0À/Ì¨À[0m" HTTPStatus.BAD_REQUEST -
+127.0.0.1 - - [22/Apr/2026 12:47:00] code 400, message Bad request version ('=5æÏõ\x10fñ¾5%\x0f\x8d\x00*êê\x13\x02\x13\x03\x13\x01À,À+Ì©À0À/Ì¨À')
+127.0.0.1 - - [22/Apr/2026 12:47:00] "[35m[1m\x16\x03\x01\x05÷\x01\x00\x05ó\x03\x03\x18éJ\x02¿hG6t/AJ{T<f H\x19êÅ¼\x04"\x87\x15©\x82HAÇ© ÊIÆÅ¿Í«wQ-m]¯\x08é\x81¤Ô\x1e=5æÏõ\x10fñ¾5%\x0f\x8d\x00*êê\x13\x02\x13\x03\x13\x01À,À+Ì©À0À/Ì¨À[0m" HTTPStatus.BAD_REQUEST -
+127.0.0.1 - - [22/Apr/2026 12:47:00] code 400, message Bad request version ('\x0f\x01¯^ç\x03ÙLÌÌç\x9dU\x00*::\x13\x02\x13\x03\x13\x01À,À+Ì©À0À/Ì¨À')
+127.0.0.1 - - [22/Apr/2026 12:47:00] "[35m[1m\x16\x03\x01\x05÷\x01\x00\x05ó\x03\x03Þ\x06\x85\x82µ\x01u\x0b=z6Âz8~\x1b\x9e+\x12;æÝD­ÜÀ´\x87³L8\x9e ¯¾\x1a'¿\x04àç´Ìý\x9bÈ¨ÆÅ¶Ï\x85\x0f\x01¯^ç\x03ÙLÌÌç\x9dU\x00*::\x13\x02\x13\x03\x13\x01À,À+Ì©À0À/Ì¨À[0m" HTTPStatus.BAD_REQUEST -
+127.0.0.1 - - [22/Apr/2026 12:47:05] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [22/Apr/2026 12:47:05] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+127.0.0.1 - - [22/Apr/2026 12:47:06] "GET /api/prices HTTP/1.1" 200 -
+127.0.0.1 - - [22/Apr/2026 12:47:36] "GET /api/prices HTTP/1.1" 200 -
+127.0.0.1 - - [22/Apr/2026 12:48:06] "GET /api/prices HTTP/1.1" 200 -
+127.0.0.1 - - [22/Apr/2026 12:48:36] "GET /api/prices HTTP/1.1" 200 -
+127.0.0.1 - - [22/Apr/2026 12:49:06] "GET /api/prices HTTP/1.1" 200 -
+127.0.0.1 - - [22/Apr/2026 12:49:36] "GET /api/prices HTTP/1.1" 200 -
