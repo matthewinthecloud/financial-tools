@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Market Dashboard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 2.5rem;
+    }
+
+    header h1 {
+      font-size: 1.6rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      color: #f0f6fc;
+    }
+
+    header p {
+      margin-top: 0.4rem;
+      font-size: 0.85rem;
+      color: #8b949e;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1.25rem;
+      width: 100%;
+      max-width: 960px;
+    }
+
+    .card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      padding: 1.5rem 1.75rem;
+      transition: border-color 0.2s;
+    }
+
+    .card:hover {
+      border-color: #58a6ff;
+    }
+
+    .card-label {
+      font-size: 0.78rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #8b949e;
+      margin-bottom: 0.75rem;
+    }
+
+    .card-ticker {
+      font-size: 0.7rem;
+      color: #484f58;
+      float: right;
+      font-family: monospace;
+    }
+
+    .card-value {
+      font-size: 2.1rem;
+      font-weight: 700;
+      color: #f0f6fc;
+      letter-spacing: -0.02em;
+      line-height: 1;
+    }
+
+    .card-unit {
+      display: inline-block;
+      font-size: 0.8rem;
+      color: #8b949e;
+      margin-left: 0.35rem;
+      font-weight: 400;
+    }
+
+    .card-value.loading {
+      color: #30363d;
+    }
+
+    .card-value.error {
+      color: #f85149;
+      font-size: 1rem;
+    }
+
+    .accent-gold    { border-top: 3px solid #d4a017; }
+    .accent-oil     { border-top: 3px solid #e07b39; }
+    .accent-sp500   { border-top: 3px solid #3fb950; }
+    .accent-tbond   { border-top: 3px solid #58a6ff; }
+
+    footer {
+      margin-top: 2.5rem;
+      font-size: 0.78rem;
+      color: #484f58;
+      text-align: center;
+    }
+
+    #status-dot {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #3fb950;
+      margin-right: 6px;
+      vertical-align: middle;
+      animation: pulse 2s infinite;
+    }
+
+    #status-dot.error { background: #f85149; animation: none; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.4; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Market Dashboard</h1>
+    <p>Live prices &mdash; refreshes every 30 seconds</p>
+  </header>
+
+  <div class="grid">
+    <div class="card accent-gold">
+      <div class="card-label">Gold <span class="card-ticker">GC=F</span></div>
+      <div class="card-value loading" id="val-gold">—</div>
+      <span class="card-unit" id="unit-gold">USD / oz</span>
+    </div>
+
+    <div class="card accent-oil">
+      <div class="card-label">WTI Crude Oil <span class="card-ticker">CL=F</span></div>
+      <div class="card-value loading" id="val-oil">—</div>
+      <span class="card-unit" id="unit-oil">USD / bbl</span>
+    </div>
+
+    <div class="card accent-sp500">
+      <div class="card-label">S&amp;P 500 <span class="card-ticker">^GSPC</span></div>
+      <div class="card-value loading" id="val-sp500">—</div>
+      <span class="card-unit" id="unit-sp500">points</span>
+    </div>
+
+    <div class="card accent-tbond">
+      <div class="card-label">10-Year Treasury <span class="card-ticker">DGS10</span></div>
+      <div class="card-value loading" id="val-treasury">—</div>
+      <span class="card-unit" id="unit-treasury">%</span>
+    </div>
+  </div>
+
+  <footer>
+    <span id="status-dot"></span>
+    <span id="last-updated">Fetching data&hellip;</span>
+  </footer>
+
+  <script>
+    const fields = {
+      gold:         { el: "val-gold",     fmt: v => v.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2}) },
+      oil:          { el: "val-oil",      fmt: v => v.toFixed(2) },
+      sp500:        { el: "val-sp500",    fmt: v => v.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2}) },
+      treasury_10y: { el: "val-treasury", fmt: v => v.toFixed(3) },
+    };
+
+    async function fetchPrices() {
+      const dot = document.getElementById("status-dot");
+      const ts  = document.getElementById("last-updated");
+      try {
+        const res  = await fetch("/api/prices");
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        for (const [key, cfg] of Object.entries(fields)) {
+          const el  = document.getElementById(cfg.el);
+          const val = data[key]?.value;
+          el.classList.remove("loading", "error");
+          if (val !== null && val !== undefined) {
+            el.textContent = cfg.fmt(val);
+          } else {
+            el.textContent = "N/A";
+            el.classList.add("error");
+          }
+        }
+
+        dot.className = "";
+        ts.textContent = "Last updated: " + new Date().toLocaleTimeString();
+      } catch (err) {
+        dot.className = "error";
+        ts.textContent = "Update failed — retrying in 30s";
+        console.error("Fetch error:", err);
+      }
+    }
+
+    fetchPrices();
+    setInterval(fetchPrices, 30_000);
+  </script>
+</body>
+</html>
