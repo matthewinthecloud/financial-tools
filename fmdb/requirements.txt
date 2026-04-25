@@ -5,4 +5,5 @@ pandas>=2.0
 numpy>=1.24
 python-dotenv>=1.0
 requests>=2.31
-pandas-ta>=0.3.14b
+# pandas-ta: install manually if needed: pip install pandas-ta
+# All indicators implemented natively in analytics/compute.py

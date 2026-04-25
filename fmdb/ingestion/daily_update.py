@@ -59,7 +59,7 @@ def run_daily_update():
                 issues = check_economics_data(df, iid)
                 _ingest_economics(engine, iid, df, source)
             else:
-                issues = check_price_data(df, iid)
+                issues = check_price_data(df, iid, asset_class=asset_class)
                 _ingest_prices(engine, iid, df, source)
 
             if issues:

@@ -7,6 +7,19 @@ from db.schema import raw_prices, raw_economics, analytics_prices, analytics_eco
 
 logger = logging.getLogger(__name__)
 
+def _f(v):
+    """Convert numpy scalar to Python float, or None if nan/None."""
+    if v is None:
+        return None
+    try:
+        import math
+        f = float(v)
+        return None if math.isnan(f) or math.isinf(f) else f
+    except (TypeError, ValueError):
+        return None
+
+
+
 # ─────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────
@@ -233,34 +246,34 @@ def compute_price_analytics(engine, instrument_id: str, date_range=None):
     row = {
         'instrument_id': instrument_id,
         'date': today.date(),
-        'ret_1d': pct_ret(1),
-        'ret_1w': pct_ret(5),
-        'ret_1m': pct_ret(21),
-        'ret_3m': pct_ret(63),
-        'ret_6m': pct_ret(126),
-        'ret_12m': pct_ret(252),
-        'ret_ytd': ytd_ret(),
-        'vol_20d': rolling_vol(20),
-        'vol_60d': rolling_vol(60),
-        'vol_252d': rolling_vol(252),
-        'ma_50d': float(ma50) if ma50 else None,
-        'ma_200d': float(ma200) if ma200 else None,
-        'dist_ma50': dist_ma50,
-        'dist_ma200': dist_ma200,
+        'ret_1d': _f(pct_ret(1)),
+        'ret_1w': _f(pct_ret(5)),
+        'ret_1m': _f(pct_ret(21)),
+        'ret_3m': _f(pct_ret(63)),
+        'ret_6m': _f(pct_ret(126)),
+        'ret_12m': _f(pct_ret(252)),
+        'ret_ytd': _f(ytd_ret()),
+        'vol_20d': _f(rolling_vol(20)),
+        'vol_60d': _f(rolling_vol(60)),
+        'vol_252d': _f(rolling_vol(252)),
+        'ma_50d': _f(ma50),
+        'ma_200d': _f(ma200),
+        'dist_ma50': _f(dist_ma50),
+        'dist_ma200': _f(dist_ma200),
         'golden_cross': golden_cross,
-        'beta_spy_252d': beta(),
-        'sharpe_252d': sharpe(),
-        'drawdown_52w': drawdown_52w(),
-        'rsi_14': float(rsi) if rsi and not np.isnan(rsi) else None,
-        'mfi_14': float(mfi) if mfi and not np.isnan(mfi) else None,
-        'macd_line': float(macd_line.iloc[-1]) if not macd_line.empty else None,
-        'macd_signal': float(macd_sig.iloc[-1]) if not macd_sig.empty else None,
-        'macd_hist': float(macd_hist.iloc[-1]) if not macd_hist.empty else None,
-        'atr_14': float(atr14) if atr14 and not np.isnan(atr14) else None,
-        'atr_100': float(atr100) if atr100 and not np.isnan(atr100) else None,
-        'bb_width': float(bb_w) if bb_w and not np.isnan(bb_w) else None,
-        'adx': float(adx) if adx and not np.isnan(adx) else None,
-        'rmi_value': float(rmi_val) if rmi_val and not np.isnan(rmi_val) else None,
+        'beta_spy_252d': _f(beta()),
+        'sharpe_252d': _f(sharpe()),
+        'drawdown_52w': _f(drawdown_52w()),
+        'rsi_14': _f(rsi),
+        'mfi_14': _f(mfi),
+        'macd_line': _f(macd_line.iloc[-1]) if not macd_line.empty else None,
+        'macd_signal': _f(macd_sig.iloc[-1]) if not macd_sig.empty else None,
+        'macd_hist': _f(macd_hist.iloc[-1]) if not macd_hist.empty else None,
+        'atr_14': _f(atr14),
+        'atr_100': _f(atr100),
+        'bb_width': _f(bb_w),
+        'adx': _f(adx),
+        'rmi_value': _f(rmi_val),
         'rmi_signal': rmi_sig,
         'computed_at': datetime.utcnow(),
     }

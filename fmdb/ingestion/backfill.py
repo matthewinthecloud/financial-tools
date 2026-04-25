@@ -153,7 +153,7 @@ def run_backfill():
                 issues = check_economics_data(df, iid)
                 count = _ingest_economics(engine, iid, df, source)
             else:
-                issues = check_price_data(df, iid)
+                issues = check_price_data(df, iid, asset_class=asset_class)
                 count = _ingest_prices(engine, iid, df, source)
 
             if issues:

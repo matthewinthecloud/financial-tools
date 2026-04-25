@@ -7,7 +7,11 @@ from db.schema import raw_quality_log
 logger = logging.getLogger(__name__)
 
 
-def check_price_data(df: pd.DataFrame, instrument_id: str) -> list:
+NO_VOLUME_ASSET_CLASSES = {'fx', 'index', 'precious_metal'}
+
+
+def check_price_data(df: pd.DataFrame, instrument_id: str, asset_class: str = '', **kwargs) -> list:
+    kwargs['skip_volume'] = asset_class.lower() in NO_VOLUME_ASSET_CLASSES or kwargs.get('skip_volume', False)
     issues = []
 
     if df.empty:
@@ -35,16 +39,18 @@ def check_price_data(df: pd.DataFrame, instrument_id: str) -> list:
             'message': f"Negative price detected: close={row.get('close')}",
         })
 
-    # Zero volume (warn only — some instruments like indices have no volume)
-    zero_vol = df[df['volume'] == 0]
-    for _, row in zero_vol.iterrows():
-        issues.append({
-            'instrument_id': instrument_id,
-            'date': row.get('date'),
-            'check_name': 'zero_volume',
-            'severity': 'warn',
-            'message': 'Volume is zero',
-        })
+    # Zero volume — skip for asset classes where volume is not applicable
+    # (FX, indices, precious metals spot — handled by caller passing skip_volume=True)
+    if not kwargs.get('skip_volume', False):
+        zero_vol = df[df['volume'] == 0]
+        for _, row in zero_vol.iterrows():
+            issues.append({
+                'instrument_id': instrument_id,
+                'date': row.get('date'),
+                'check_name': 'zero_volume',
+                'severity': 'warn',
+                'message': 'Volume is zero',
+            })
 
     # Large day-over-day price gaps (>20%)
     if 'close' in df.columns and len(df) > 1:
