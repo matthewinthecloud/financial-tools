@@ -408,7 +408,7 @@ canvas#modalRsiChart{{width:100%!important;height:120px!important;}}
 <script>
 const DATA      = {data_json};
 const TABS      = {tabs_json};
-const TAB_DEF   = {{tab_defaults}};
+const TAB_DEF   = {tab_defaults};
 const NAMES     = {names_json};
 const CHART_SRS = {chart_json};
 const REAL_SRS  = {real_json};
