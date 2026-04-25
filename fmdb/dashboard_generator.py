@@ -43,23 +43,17 @@ TABS = {
                     "TLT","LQD","TIP","EMB","UVXY","VXX","VNQ","VNQI"],
         "default_chart": ["GLD","SLV","GDX","XLE","IBIT","TLT","HYG","VNQ","TAN","URA"],
     },
-    "full_universe": {
-        "label": "All",
-        "tickers": [],  # populated below
-        "default_chart": ["SPY","QQQ","GLD","TLT","IBIT","XLK","EWZ","FXI","EWJ","VWO"],
-    },
 }
 
-# Populate full universe
+# Dedupe all tickers for data loading
 _all = []
 seen = set()
 for t in TABS:
-    if t == "full_universe": continue
     for tick in TABS[t]["tickers"]:
         if tick not in seen:
             _all.append(tick)
             seen.add(tick)
-TABS["full_universe"]["tickers"] = _all
+ALL_TICKERS = _all
 
 NAMES = {
     "SPY":"S&P 500 (US)","QQQ":"Nasdaq 100 (US)",
@@ -140,9 +134,10 @@ def load_price_history(engine, tickers):
     return pd.read_sql(text(q), engine)
 
 
-def build_chart_series(hist_df, tickers, tf_days):
+def build_chart_series(hist_df, tickers, tf_days, normalized=True):
     """
-    For each ticker, build normalized-to-100 price series for the given lookback.
+    Build price series for the given lookback.
+    normalized=True: base 100. normalized=False: real prices.
     Returns {ticker: [{x: 'YYYY-MM-DD', y: float}, ...]}
     """
     result = {}
@@ -157,11 +152,44 @@ def build_chart_series(hist_df, tickers, tf_days):
             sub = sub.tail(tf_days + 5).tail(tf_days) if tf_days <= len(sub) else sub
         if sub.empty or len(sub) < 2:
             continue
-        base = sub['adj_close'].iloc[0]
-        if base == 0: continue
-        points = [{"x": str(row['date']), "y": round(float(row['adj_close']) / base * 100, 3)}
-                  for _, row in sub.iterrows()]
+        if normalized:
+            base = sub['adj_close'].iloc[0]
+            if base == 0: continue
+            points = [{"x": str(row['date']), "y": round(float(row['adj_close']) / base * 100, 3)}
+                      for _, row in sub.iterrows()]
+        else:
+            points = [{"x": str(row['date']), "y": round(float(row['adj_close']), 4)}
+                      for _, row in sub.iterrows()]
         result[ticker] = points
+    return result
+
+
+def build_rsi_series(hist_df, tickers, tf_days, period=14):
+    """Build RSI(14) series for the modal indicator panel."""
+    result = {}
+    for ticker in tickers:
+        sub = hist_df[hist_df['instrument_id'] == ticker].sort_values('date').copy()
+        if len(sub) < period + 5:
+            continue
+        close = sub['adj_close']
+        delta = close.diff()
+        gain = delta.clip(lower=0).rolling(period).mean()
+        loss = (-delta).clip(lower=0).rolling(period).mean()
+        rs = gain / loss.replace(0, np.nan)
+        rsi = (100 - (100 / (1 + rs))).round(2)
+        sub = sub.copy()
+        sub['rsi'] = rsi
+        # trim to tf window
+        if tf_days == 0:
+            ytd_start = pd.Timestamp(sub['date'].max().year, 1, 1)
+            sub = sub[pd.to_datetime(sub['date']) >= ytd_start]
+        elif tf_days <= len(sub):
+            sub = sub.tail(tf_days)
+        sub = sub.dropna(subset=['rsi'])
+        if len(sub) < 2:
+            continue
+        result[ticker] = [{"x": str(row['date']), "y": float(row['rsi'])}
+                          for _, row in sub.iterrows()]
     return result
 
 
@@ -189,18 +217,19 @@ def compute_zscores(hist_df, tickers):
 def build_data(engine):
     ana = load_analytics(engine)
     if ana.empty:
-        return {}, {}, {}, datetime.now().strftime('%Y-%m-%d')
+        return {}, {}, {}, {}, datetime.now().strftime('%Y-%m-%d')
 
-    all_tickers = [t for tab in TABS.values() for t in tab['tickers']]
-    all_tickers = list(dict.fromkeys(all_tickers))  # dedupe preserving order
+    hist = load_price_history(engine, ALL_TICKERS)
+    zscores = compute_zscores(hist, ALL_TICKERS)
 
-    hist = load_price_history(engine, all_tickers)
-    zscores = compute_zscores(hist, all_tickers)
-
-    # Build per-timeframe chart series
+    # Build per-timeframe chart series (normalized for group chart)
     TF_DAYS = {"ret_1w":5, "ret_1m":21, "ret_3m":63, "ret_6m":126, "ret_12m":252, "ret_ytd":0}
-    chart_series = {tf: build_chart_series(hist, all_tickers, days)
+    chart_series = {tf: build_chart_series(hist, ALL_TICKERS, days, normalized=True)
                     for tf, days in TF_DAYS.items()}
+    # Real price series for modal (use longest window — 2yr)
+    real_series = build_chart_series(hist, ALL_TICKERS, 504, normalized=False)
+    # RSI series for modal indicator panel
+    rsi_series  = build_rsi_series(hist, ALL_TICKERS, 504)
 
     instruments = {}
     for _, row in ana.iterrows():
@@ -227,16 +256,18 @@ def build_data(engine):
         }
 
     as_of = str(ana['date'].max())
-    return instruments, chart_series, as_of
+    return instruments, chart_series, real_series, rsi_series, as_of
 
 
-def generate_html(instruments, chart_series, as_of, tabs):
+def generate_html(instruments, chart_series, real_series, rsi_series, as_of, tabs):
     tabs_json    = json.dumps({k: v['tickers'] for k, v in tabs.items()})
     tab_labels   = json.dumps({k: v['label']   for k, v in tabs.items()})
     tab_defaults = json.dumps({k: v.get('default_chart', v['tickers'][:10]) for k, v in tabs.items()})
     data_json    = json.dumps(instruments)
     names_json   = json.dumps(NAMES)
     chart_json   = json.dumps(chart_series)
+    real_json    = json.dumps(real_series)
+    rsi_json     = json.dumps(rsi_series)
     colors_json  = json.dumps(CHART_COLORS)
     core_json    = json.dumps(CORE_SPDRS)
 
@@ -246,7 +277,8 @@ def generate_html(instruments, chart_series, as_of, tabs):
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Market Pulse</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"><\/script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js"><\/script>
 <style>
 :root{{
   --bg:#0d1117;--card:#161b22;--border:#30363d;--text:#f0f6fc;--muted:#8b949e;
@@ -327,7 +359,9 @@ tr:hover td{{background:rgba(255,255,255,.03);}}
 .stat-card{{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 14px;min-width:90px;}}
 .stat-label{{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;}}
 .stat-val{{font-size:16px;font-weight:700;margin-top:3px;}}
-canvas#modalChart{{width:100%!important;height:220px!important;}}
+.modal-chart-label{{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:12px 0 6px;}}
+canvas#modalPriceChart{{width:100%!important;height:200px!important;}}
+canvas#modalRsiChart{{width:100%!important;height:120px!important;}}
 @media(max-width:480px){{
   .header h1{{font-size:18px;}}
   th,td{{padding:6px 7px;font-size:11px;}}
@@ -354,7 +388,6 @@ canvas#modalChart{{width:100%!important;height:220px!important;}}
   <button class="tab-btn active" data-tab="us_sectors">US Sectors</button>
   <button class="tab-btn" data-tab="country_etfs">Country ETFs</button>
   <button class="tab-btn" data-tab="thematic">Thematic</button>
-  <button class="tab-btn" data-tab="full_universe">All</button>
 </div>
 <div id="panels"></div>
 
@@ -365,47 +398,47 @@ canvas#modalChart{{width:100%!important;height:220px!important;}}
     <div class="modal-ticker" id="modal-ticker"></div>
     <div class="modal-name" id="modal-name"></div>
     <div class="modal-stats" id="modal-stats"></div>
-    <canvas id="modalChart"></canvas>
+    <div class="modal-chart-label">Price (2Y)</div>
+    <canvas id="modalPriceChart"></canvas>
+    <div class="modal-chart-label">RSI (14)</div>
+    <canvas id="modalRsiChart"></canvas>
   </div>
 </div>
 
 <script>
-const DATA       = {data_json};
-const TABS       = {tabs_json};
-const TAB_LABELS = {tab_labels};
-const TAB_DEF    = {tab_defaults};
-const NAMES      = {names_json};
-const CHART_SRS  = {chart_json};
-const COLORS     = {colors_json};
-const CORE       = {core_json};
+const DATA      = {data_json};
+const TABS      = {tabs_json};
+const TAB_DEF   = {{tab_defaults}};
+const NAMES     = {names_json};
+const CHART_SRS = {chart_json};
+const REAL_SRS  = {real_json};
+const RSI_SRS   = {rsi_json};
+const COLORS    = {colors_json};
 
-let currentTf  = 'ret_1m';
-let currentTab = 'us_sectors';
-let sortState  = {{}};
-let groupChartInst  = null;
-let modalChartInst  = null;
-let activeChecks    = {{}};  // tabId -> Set of tickers
+let currentTf   = 'ret_1m';
+let currentTab  = 'us_sectors';
+let sortState   = {{}};
+let groupCharts = {{}};   // tabId -> Chart instance
+let modalPChart = null;
+let modalRChart = null;
+let activeChecks = {{}};  // tabId -> Set
 
-// ── Helpers ──────────────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────────
 function retColor(v, intensity=true) {{
-  if (v==null) return '#333';
-  const abs = Math.min(Math.abs(v)/15, 1);
-  if (!intensity) return v>=0?'#2ea043':'#f85149';
-  if (v>=0) {{ const r=Math.round(14+abs*32),g=Math.round(100+abs*60),b=Math.round(56+abs*16); return `rgb(${{r}},${{g}},${{b}})`; }}
-  else {{ const r=Math.round(100+abs*148),g=Math.round(30+abs*51),b=Math.round(30+abs*43); return `rgb(${{r}},${{g}},${{b}})`; }}
+  if(v==null) return '#333';
+  const abs=Math.min(Math.abs(v)/15,1);
+  if(!intensity) return v>=0?'#2ea043':'#f85149';
+  if(v>=0){{const r=Math.round(14+abs*32),g=Math.round(100+abs*60),b=Math.round(56+abs*16);return `rgb(${{r}},${{g}},${{b}})`;}}
+  else{{const r=Math.round(100+abs*148),g=Math.round(30+abs*51),b=Math.round(30+abs*43);return `rgb(${{r}},${{g}},${{b}})`;}}
 }}
 function fmt(v,d=2){{
   if(v==null) return '<span style="color:#555">—</span>';
-  const s=(v>=0?'+':'')+v.toFixed(d)+'%';
-  return `<span class="${{v>=0?'ret-pos':'ret-neg'}}">${{s}}</span>`;
+  return `<span class="${{v>=0?'ret-pos':'ret-neg'}}">${{(v>=0?'+':'')+v.toFixed(d)+'%'}}</span>`;
 }}
-function fmtPlain(v){{
-  if(v==null) return '—';
-  return (v>=0?'+':'')+v.toFixed(2)+'%';
-}}
-function rmiHtml(sig){{
-  if(sig==='bullish') return '<span class="rmi-bull">▲ BULL</span>';
-  if(sig==='bearish') return '<span class="rmi-bear">▼ BEAR</span>';
+function fmtPlain(v){{ return v==null?'—':(v>=0?'+':'')+v.toFixed(2)+'%'; }}
+function rmiHtml(s){{
+  if(s==='bullish') return '<span class="rmi-bull">▲ BULL</span>';
+  if(s==='bearish') return '<span class="rmi-bear">▼ BEAR</span>';
   return '<span class="rmi-neut">◆ NEUT</span>';
 }}
 function zsHtml(v){{
@@ -415,121 +448,103 @@ function zsHtml(v){{
   if(v<-2) return `<span class="z-low">${{s}} 💧</span>`;
   return s;
 }}
-function getTabRows(tabId){{
-  return (TABS[tabId]||[]).map(t=>DATA[t]).filter(Boolean);
-}}
+function getTabRows(tabId){{ return (TABS[tabId]||[]).map(t=>DATA[t]).filter(Boolean); }}
 function ranked(rows,tf){{
   const sorted=[...rows].sort((a,b)=>(b[tf]??-999)-(a[tf]??-999));
   const rm={{}};sorted.forEach((r,i)=>rm[r.ticker]=i+1);
-  const out=[];rows.forEach(r=>{{const copy=Object.assign({{}},r);copy.rank=rm[r.ticker]??999;out.push(copy);}});return out;
+  return rows.map(r=>Object.assign({{}},r,{{rank:rm[r.ticker]??999}}));
+}}
+function tfUnit(tf){{ return (tf==='ret_1w'||tf==='ret_1m')?'day':'month'; }}
+
+function baseChartOpts(unit){{
+  return {{
+    responsive:true, maintainAspectRatio:false, animation:{{duration:200}},
+    interaction:{{mode:'index',intersect:false}},
+    plugins:{{
+      legend:{{display:false}},
+      tooltip:{{backgroundColor:'#1c2128',borderColor:'#30363d',borderWidth:1,
+               titleColor:'#f0f6fc',bodyColor:'#8b949e'}},
+    }},
+    scales:{{
+      x:{{type:'time',time:{{unit}},ticks:{{color:'#8b949e',maxTicksLimit:unit==='day'?10:8}},grid:{{color:'#21262d'}}}},
+      y:{{ticks:{{color:'#8b949e'}},grid:{{color:'#21262d'}}}},
+    }},
+  }};
 }}
 
-// ── Heatmap ──────────────────────────────────────────────────────
+// ── Heatmap ────────────────────────────────────────────────────────
 function buildHeatmap(rows,tf){{
   const s=[...rows].sort((a,b)=>(b[tf]??-999)-(a[tf]??-999));
   return '<div class="heatmap">'+s.map(r=>{{
     const v=r[tf],bg=retColor(v),tc=v==null?'#888':(Math.abs(v)>4?'#fff':'#eee');
     return `<div class="heat-tile" style="background:${{bg}};color:${{tc}}" onclick="openModal('${{r.ticker}}')" title="${{r.name}}">
       <div class="ht-t">${{r.ticker}}</div>
-      <div class="ht-r">${{v!=null?(v>=0?'+':'')+v.toFixed(1)+'%':'—'}}</div>
-    </div>`;
+      <div class="ht-r">${{v!=null?(v>=0?'+':'')+v.toFixed(1)+'%':'—'}}</div></div>`;
   }}).join('')+'</div>';
 }}
 
-// ── Group chart ──────────────────────────────────────────────────
-function getColorForTicker(ticker, tickers){{
-  const i=tickers.indexOf(ticker);
-  return COLORS[i%COLORS.length];
-}}
-
+// ── Group chart (each tab gets its own canvas id) ─────────────────
 function buildGroupChart(tabId,tf){{
   const tickers=TABS[tabId]||[];
   const active=[...activeChecks[tabId]];
   const series=CHART_SRS[tf]||{{}};
   const datasets=active.filter(t=>series[t]).map(t=>{{
-    const color=getColorForTicker(t,tickers);
-    return {{
-      label:t,
-      data:series[t],
-      borderColor:color,
-      backgroundColor:color+'22',
-      borderWidth:1.8,
-      pointRadius:0,
-      tension:.3,
-      parsing:{{xAxisKey:'x',yAxisKey:'y'}},
-    }};
+    const idx=tickers.indexOf(t);
+    const color=COLORS[(idx>=0?idx:0)%COLORS.length];
+    return {{label:t,data:series[t],borderColor:color,backgroundColor:color+'18',
+            borderWidth:1.8,pointRadius:0,tension:.3,parsing:{{xAxisKey:'x',yAxisKey:'y'}}}};
   }});
-
-  const ctx=document.getElementById('groupChart');
+  const canvasId='gc-'+tabId;
+  const ctx=document.getElementById(canvasId);
   if(!ctx) return;
-  if(groupChartInst){{groupChartInst.destroy();groupChartInst=null;}}
-  groupChartInst=new Chart(ctx,{{
-    type:'line',
-    data:{{datasets}},
-    options:{{
-      responsive:true,maintainAspectRatio:false,
-      animation:{{duration:200}},
-      interaction:{{mode:'index',intersect:false}},
-      plugins:{{
-        legend:{{display:false}},
-        tooltip:{{
-          callbacks:{{
-            label:ctx=>`${{ctx.dataset.label}}: ${{ctx.parsed.y?.toFixed(1)}}`,
-          }},
-          backgroundColor:'#1c2128',borderColor:'#30363d',borderWidth:1,
-          titleColor:'#f0f6fc',bodyColor:'#8b949e',
-        }},
-      }},
-      scales:{{
-        x:{{type:'time',time:{{unit:'month'}},ticks:{{color:'#8b949e',maxTicksLimit:8}},grid:{{color:'#21262d'}}}},
-        y:{{ticks:{{color:'#8b949e',callback:v=>`${{v.toFixed(0)}}`}},grid:{{color:'#21262d'}},
-            title:{{display:true,text:'Normalized (base=100)',color:'#8b949e',font:{{size:10}}}}}},
-      }},
-    }},
-  }});
+  if(groupCharts[tabId]){{groupCharts[tabId].destroy();delete groupCharts[tabId];}}
+  const opts=baseChartOpts(tfUnit(tf));
+  opts.plugins.tooltip.callbacks={{label:c=>`${{c.dataset.label}}: ${{c.parsed.y?.toFixed(1)}}`}};
+  opts.scales.y.title={{display:true,text:'Normalized (base=100)',color:'#8b949e',font:{{size:10}}}};
+  opts.scales.y.ticks={{...opts.scales.y.ticks,callback:v=>v.toFixed(0)}};
+  groupCharts[tabId]=new Chart(ctx,{{type:'line',data:{{datasets}},options:opts}});
 }}
 
+// ── Checkbox panel ─────────────────────────────────────────────────
 function buildCbPanel(tabId){{
   const tickers=TABS[tabId]||[];
   const active=activeChecks[tabId];
   return tickers.map((t,i)=>{{
     const color=COLORS[i%COLORS.length];
-    const checked=active.has(t);
-    return `<label class="cb-label${{checked?' checked':''}}" data-ticker="${{t}}" data-tab="${{tabId}}">
-      <input type="checkbox" ${{checked?'checked':''}}/>
-      <span class="cb-dot" style="background:${{color}}"></span>
-      ${{t}}
-    </label>`;
+    const chk=active.has(t);
+    return `<label class="cb-label${{chk?' checked':''}}" data-ticker="${{t}}" data-tab="${{tabId}}">
+      <input type="checkbox"${{chk?' checked':''}}/>
+      <span class="cb-dot" style="background:${{color}}"></span>${{t}}</label>`;
   }}).join('');
 }}
 
-function buildChartSection(tabId,tf){{
+function buildChartSection(tabId){{
   return `<div class="chart-area">
     <div class="chart-toolbar">
       <span class="chart-title-txt">Normalized Performance (base 100)</span>
       <div class="quick-btns">
-        <button class="quick-btn" onclick="selectDefault('${{tabId}}')">Default</button>
-        <button class="quick-btn" onclick="selectAll('${{tabId}}')">All</button>
-        <button class="quick-btn" onclick="selectNone('${{tabId}}')">None</button>
+        <button class="quick-btn" data-action="default" data-tab="${{tabId}}">Default</button>
+        <button class="quick-btn" data-action="all"     data-tab="${{tabId}}">All</button>
+        <button class="quick-btn" data-action="none"    data-tab="${{tabId}}">None</button>
       </div>
     </div>
-    <canvas id="groupChart"></canvas>
-    <div class="cb-panel" id="cb-panel-${{tabId}}">${{buildCbPanel(tabId)}}</div>
+    <canvas id="gc-${{tabId}}" style="width:100%;height:280px;"></canvas>
+    <div class="cb-panel" id="cb-${{tabId}}">${{buildCbPanel(tabId)}}</div>
   </div>`;
 }}
 
-// ── Table ────────────────────────────────────────────────────────
+// ── Table ──────────────────────────────────────────────────────────
 const COLS=[
-  {{id:'rank',      label:'#',         sv:r=>r.rank,      html:r=>`<b>${{r.rank}}</b>`}},
-  {{id:'ticker',    label:'Ticker',    sv:r=>r.ticker,    html:r=>`<b>${{r.ticker}}</b>`}},
-  {{id:'name',      label:'Name',      sv:r=>r.name,      html:r=>`<span style="color:var(--muted)">${{r.name}}</span>`}},
-  {{id:'ret',       label:'Return',    sv:r=>r[currentTf]??-999, html:r=>fmt(r[currentTf])}},
-  {{id:'rmi_signal',label:'RMI',       sv:r=>r.rmi_signal,html:r=>rmiHtml(r.rmi_signal)}},
-  {{id:'rsi_14',    label:'RSI',       sv:r=>r.rsi_14??-1,html:r=>r.rsi_14!=null?r.rsi_14.toFixed(1):'—'}},
-  {{id:'dist_ma50', label:'vs 50d',    sv:r=>r.dist_ma50??-999, html:r=>fmt(r.dist_ma50)}},
-  {{id:'dist_ma200',label:'vs 200d',   sv:r=>r.dist_ma200??-999,html:r=>fmt(r.dist_ma200)}},
-  {{id:'vol_20d',   label:'Vol 20d',   sv:r=>r.vol_20d??-1,    html:r=>r.vol_20d!=null?r.vol_20d.toFixed(1)+'%':'—'}},
-  {{id:'zscore',    label:'Z-Score',   sv:r=>r.zscore_ret1m??-99,html:r=>zsHtml(r.zscore_ret1m)}},
+  {{id:'rank',      label:'#',        sv:r=>r.rank,             html:r=>`<b>${{r.rank}}</b>`}},
+  {{id:'ticker',    label:'Ticker',   sv:r=>r.ticker,           html:r=>`<b>${{r.ticker}}</b>`}},
+  {{id:'name',      label:'Name',     sv:r=>r.name,             html:r=>`<span style="color:var(--muted)">${{r.name}}</span>`}},
+  {{id:'ret',       label:'Return',   sv:r=>r[currentTf]??-999, html:r=>fmt(r[currentTf])}},
+  {{id:'rmi_signal',label:'RMI',      sv:r=>r.rmi_signal,       html:r=>rmiHtml(r.rmi_signal)}},
+  {{id:'rsi_14',    label:'RSI',      sv:r=>r.rsi_14??-1,       html:r=>r.rsi_14!=null?r.rsi_14.toFixed(1):'—'}},
+  {{id:'dist_ma50', label:'vs 50d',   sv:r=>r.dist_ma50??-999,  html:r=>fmt(r.dist_ma50)}},
+  {{id:'dist_ma200',label:'vs 200d',  sv:r=>r.dist_ma200??-999, html:r=>fmt(r.dist_ma200)}},
+  {{id:'vol_20d',   label:'Vol 20d',  sv:r=>r.vol_20d??-1,      html:r=>r.vol_20d!=null?r.vol_20d.toFixed(1)+'%':'—'}},
+  {{id:'zscore',    label:'Z-Score',  sv:r=>r.zscore_ret1m??-99,html:r=>zsHtml(r.zscore_ret1m)}},
 ];
 
 function buildTable(rows,tabId,tf){{
@@ -538,86 +553,87 @@ function buildTable(rows,tabId,tf){{
     const col=COLS.find(c=>c.id===st.col);
     if(!col) return 0;
     const va=col.sv(a),vb=col.sv(b);
-    if(typeof va==='string') return st.dir*va.localeCompare(vb);
-    return st.dir*(va-vb);
+    return typeof va==='string'?st.dir*va.localeCompare(vb):st.dir*(va-vb);
   }});
   const thead='<thead><tr>'+COLS.map(c=>{{
-    const active=st.col===c.id;
-    return `<th class="${{active?'sorted':''}}" data-col="${{c.id}}" data-tab="${{tabId}}">${{c.label}}<span class="sort-arrow">${{active?(st.dir===1?'▲':'▼'):'⇅'}}</span></th>`;
+    const act=st.col===c.id;
+    return `<th class="${{act?'sorted':''}}" data-col="${{c.id}}" data-tab="${{tabId}}">${{c.label}}<span class="sort-arrow">${{act?(st.dir===1?'▲':'▼'):'⇅'}}</span></th>`;
   }}).join('')+'</tr></thead>';
-  const tbody='<tbody>'+s.map(r=>{{
-    const cells=COLS.map(c=>`<td>${{c.html(r)}}</td>`).join('');
-    return `<tr onclick="openModal('${{r.ticker}}')">${{cells}}</tr>`;
-  }}).join('')+'</tbody>';
-  return '<div class="tbl-wrap"><table>'+thead+tbody+'</table></div>';
+  const tbody='<tbody>'+s.map(r=>`<tr onclick="openModal('${{r.ticker}}')">${{COLS.map(c=>`<td>${{c.html(r)}}</td>`).join('')}}</tr>`).join('')+'</tbody>';
+  return `<div class="tbl-wrap" data-tbl="${{tabId}}"><table>${{thead}}${{tbody}}</table></div>`;
 }}
 
-// ── Bars ─────────────────────────────────────────────────────────
+// ── Bars ───────────────────────────────────────────────────────────
 function buildBars(rows,tf){{
   const s=[...rows].sort((a,b)=>(b[tf]??-999)-(a[tf]??-999));
-  const vals=s.map(r=>r[tf]).filter(v=>v!=null);
-  const maxA=Math.max(...vals.map(Math.abs),0.01);
+  const maxA=Math.max(...s.map(r=>Math.abs(r[tf]??0)),0.01);
   return '<div class="bars">'+s.map(r=>{{
     const v=r[tf],pct=v!=null?Math.abs(v)/maxA*100:0,c=retColor(v,false);
     return `<div class="bar-row" onclick="openModal('${{r.ticker}}')">
       <div class="bar-label" title="${{r.name}}">${{r.ticker}}</div>
       <div class="bar-track"><div class="bar-fill" style="width:${{pct.toFixed(1)}}%;background:${{c}}"></div>
-      <span class="bar-val" style="color:${{c}}">${{fmtPlain(v)}}</span></div>
-    </div>`;
+      <span class="bar-val" style="color:${{c}}">${{fmtPlain(v)}}</span></div></div>`;
   }}).join('')+'</div>';
 }}
 
-// ── Modal ────────────────────────────────────────────────────────
+// ── Modal ──────────────────────────────────────────────────────────
 function openModal(ticker){{
-  const d=DATA[ticker];
-  if(!d) return;
+  const d=DATA[ticker]; if(!d) return;
   document.getElementById('modal-ticker').textContent=ticker;
   document.getElementById('modal-name').textContent=d.name;
 
   const stats=[
-    {{label:'1M Return',val:fmtPlain(d.ret_1m),cls:d.ret_1m>=0?'ret-pos':'ret-neg'}},
-    {{label:'3M Return',val:fmtPlain(d.ret_3m),cls:d.ret_3m>=0?'ret-pos':'ret-neg'}},
-    {{label:'RSI (14)',val:d.rsi_14!=null?d.rsi_14.toFixed(1):'—',cls:''}},
-    {{label:'RMI Signal',val:(d.rmi_signal||'neutral').toUpperCase(),
+    {{label:'1M',    val:fmtPlain(d.ret_1m),  cls:d.ret_1m>=0?'ret-pos':'ret-neg'}},
+    {{label:'3M',    val:fmtPlain(d.ret_3m),  cls:d.ret_3m>=0?'ret-pos':'ret-neg'}},
+    {{label:'12M',   val:fmtPlain(d.ret_12m), cls:(d.ret_12m??0)>=0?'ret-pos':'ret-neg'}},
+    {{label:'YTD',   val:fmtPlain(d.ret_ytd), cls:(d.ret_ytd??0)>=0?'ret-pos':'ret-neg'}},
+    {{label:'RSI 14',val:d.rsi_14!=null?d.rsi_14.toFixed(1):'—',cls:''}},
+    {{label:'RMI',   val:(d.rmi_signal||'neutral').toUpperCase(),
       cls:d.rmi_signal==='bullish'?'rmi-bull':d.rmi_signal==='bearish'?'rmi-bear':'rmi-neut'}},
-    {{label:'vs 50d MA',val:fmtPlain(d.dist_ma50),cls:d.dist_ma50>=0?'ret-pos':'ret-neg'}},
+    {{label:'vs 50d', val:fmtPlain(d.dist_ma50), cls:(d.dist_ma50??0)>=0?'ret-pos':'ret-neg'}},
     {{label:'Vol 20d',val:d.vol_20d!=null?d.vol_20d.toFixed(1)+'%':'—',cls:''}},
     {{label:'Z-Score',val:d.zscore_ret1m!=null?(d.zscore_ret1m>=0?'+':'')+d.zscore_ret1m.toFixed(2):'—',
       cls:d.zscore_ret1m>2?'z-high':d.zscore_ret1m<-2?'z-low':''}},
-    {{label:'YTD',val:fmtPlain(d.ret_ytd),cls:d.ret_ytd>=0?'ret-pos':'ret-neg'}},
   ];
   document.getElementById('modal-stats').innerHTML=stats.map(s=>
     `<div class="stat-card"><div class="stat-label">${{s.label}}</div><div class="stat-val ${{s.cls}}">${{s.val}}</div></div>`
   ).join('');
 
-  // Modal chart — use current tf series
-  const series=CHART_SRS[currentTf]||{{}};
-  const pts=series[ticker]||[];
-  if(modalChartInst){{modalChartInst.destroy();modalChartInst=null;}}
-  const mCtx=document.getElementById('modalChart');
-  if(pts.length>1){{
-    const color='#58a6ff';
-    modalChartInst=new Chart(mCtx,{{
+  if(modalPChart){{modalPChart.destroy();modalPChart=null;}}
+  if(modalRChart){{modalRChart.destroy();modalRChart=null;}}
+
+  const unit=tfUnit(currentTf);
+  const pricePts=REAL_SRS[ticker]||[];
+  const rsiPts  =RSI_SRS[ticker]  ||[];
+
+  if(pricePts.length>1){{
+    const pOpts=baseChartOpts('month');  // real price always shows 2yr
+    pOpts.scales.y.ticks.callback=v=>'$'+v.toFixed(2);
+    pOpts.plugins.tooltip.callbacks={{label:c=>`$${{c.parsed.y?.toFixed(2)}}`}};
+    modalPChart=new Chart(document.getElementById('modalPriceChart'),{{
       type:'line',
-      data:{{datasets:[{{
-        label:ticker,data:pts,
-        borderColor:color,backgroundColor:color+'22',
-        borderWidth:2,pointRadius:0,tension:.3,
-        parsing:{{xAxisKey:'x',yAxisKey:'y'}},
-        fill:true,
-      }}]}},
-      options:{{
-        responsive:true,maintainAspectRatio:false,animation:{{duration:150}},
-        plugins:{{legend:{{display:false}},tooltip:{{
-          backgroundColor:'#1c2128',borderColor:'#30363d',borderWidth:1,
-          titleColor:'#f0f6fc',bodyColor:'#8b949e',
-          callbacks:{{label:c=>`${{c.parsed.y?.toFixed(2)}}`}},
-        }}}},
-        scales:{{
-          x:{{type:'time',time:{{unit:'month'}},ticks:{{color:'#8b949e',maxTicksLimit:6}},grid:{{color:'#21262d'}}}},
-          y:{{ticks:{{color:'#8b949e',callback:v=>v.toFixed(0)}},grid:{{color:'#21262d'}}}},
-        }},
-      }},
+      data:{{datasets:[{{label:ticker,data:pricePts,borderColor:'#58a6ff',
+        backgroundColor:'#58a6ff22',borderWidth:2,pointRadius:0,tension:.3,
+        parsing:{{xAxisKey:'x',yAxisKey:'y'}},fill:true}}]}},
+      options:pOpts,
+    }});
+  }}
+
+  if(rsiPts.length>1){{
+    const rOpts=baseChartOpts('month');
+    rOpts.scales.y={{...rOpts.scales.y,min:0,max:100,ticks:{{...rOpts.scales.y.ticks,callback:v=>v}}}};
+    rOpts.plugins.tooltip.callbacks={{label:c=>`RSI: ${{c.parsed.y?.toFixed(1)}}`}};
+    modalRChart=new Chart(document.getElementById('modalRsiChart'),{{
+      type:'line',
+      data:{{datasets:[
+        {{label:'RSI',data:rsiPts,borderColor:'#f0883e',backgroundColor:'#f0883e18',
+         borderWidth:1.5,pointRadius:0,tension:.3,parsing:{{xAxisKey:'x',yAxisKey:'y'}},fill:true}},
+        {{label:'OB70',data:rsiPts.map(p=>({{x:p.x,y:70}})),borderColor:'#f8514944',
+         borderWidth:1,pointRadius:0,borderDash:[4,4],parsing:{{xAxisKey:'x',yAxisKey:'y'}}}},
+        {{label:'OS30',data:rsiPts.map(p=>({{x:p.x,y:30}})),borderColor:'#2ea04344',
+         borderWidth:1,pointRadius:0,borderDash:[4,4],parsing:{{xAxisKey:'x',yAxisKey:'y'}}}},
+      ]}},
+      options:rOpts,
     }});
   }}
 
@@ -626,136 +642,102 @@ function openModal(ticker){{
 
 function closeModal(){{
   document.getElementById('modal').classList.remove('open');
-  if(modalChartInst){{modalChartInst.destroy();modalChartInst=null;}}
+  if(modalPChart){{modalPChart.destroy();modalPChart=null;}}
+  if(modalRChart){{modalRChart.destroy();modalRChart=null;}}
 }}
 
-// ── Checkbox logic ───────────────────────────────────────────────
-function selectDefault(tabId){{
-  activeChecks[tabId]=new Set(TAB_DEF[tabId]||[]);
-  refreshCbPanel(tabId);buildGroupChart(tabId,currentTf);
-}}
-function selectAll(tabId){{
-  activeChecks[tabId]=new Set(TABS[tabId]||[]);
-  refreshCbPanel(tabId);buildGroupChart(tabId,currentTf);
-}}
-function selectNone(tabId){{
-  activeChecks[tabId]=new Set();
-  refreshCbPanel(tabId);buildGroupChart(tabId,currentTf);
-}}
-function refreshCbPanel(tabId){{
-  const panel=document.getElementById('cb-panel-'+tabId);
-  if(panel) panel.innerHTML=buildCbPanel(tabId);
-  attachCbListeners(tabId);
-}}
-function attachCbListeners(tabId){{
-  const panel=document.getElementById('cb-panel-'+tabId);
-  if(!panel) return;
-  panel.querySelectorAll('.cb-label').forEach(lbl=>{{
-    lbl.addEventListener('click',()=>{{
-      const t=lbl.dataset.ticker;
-      if(activeChecks[tabId].has(t)) activeChecks[tabId].delete(t);
-      else activeChecks[tabId].add(t);
-      lbl.classList.toggle('checked',activeChecks[tabId].has(t));
-      buildGroupChart(tabId,currentTf);
-    }});
-  }});
-}}
-
-// ── Render tab ───────────────────────────────────────────────────
+// ── Render tab ─────────────────────────────────────────────────────
 function renderTab(tabId,tf){{
   const rows=ranked(getTabRows(tabId),tf);
   const panel=document.getElementById('panel-'+tabId);
   if(!panel) return;
+  if(groupCharts[tabId]){{groupCharts[tabId].destroy();delete groupCharts[tabId];}}
 
   panel.innerHTML=
-    '<div class="section-hdr">Heatmap</div>'+
-    buildHeatmap(rows,tf)+
-    '<div class="section-hdr">Performance Chart</div>'+
-    buildChartSection(tabId,tf)+
-    '<div class="section-hdr">Rankings</div>'+
-    buildTable(rows,tabId,tf)+
-    '<div class="section-hdr" style="margin-top:16px">Relative Strength</div>'+
-    buildBars(rows,tf);
+    '<div class="section-hdr">Heatmap</div>'+buildHeatmap(rows,tf)+
+    '<div class="section-hdr">Performance Chart</div>'+buildChartSection(tabId)+
+    '<div class="section-hdr">Rankings</div>'+buildTable(rows,tabId,tf)+
+    '<div class="section-hdr" style="margin-top:16px">Relative Strength</div>'+buildBars(rows,tf);
 
-  // Sort listeners
-  panel.querySelectorAll('th[data-col]').forEach(th=>{{
-    th.addEventListener('click',()=>{{
-      const col=th.dataset.col,tab=th.dataset.tab;
-      const st=sortState[tab]||{{col:'rank',dir:1}};
-      sortState[tab]=col===st.col?{{col,dir:-st.dir}}:{{col,dir:1}};
-      const rows2=ranked(getTabRows(tab),currentTf);
-      const tbl=panel.querySelector('.tbl-wrap');
-      if(tbl) tbl.outerHTML=buildTable(rows2,tab,currentTf);
-      // re-attach after rerender
-      panel.querySelectorAll('th[data-col]').forEach(th2=>{{
-        th2.addEventListener('click',()=>{{
-          const c=th2.dataset.col,t=th2.dataset.tab;
-          const s=sortState[t]||{{col:'rank',dir:1}};
-          sortState[t]=c===s.col?{{col:c,dir:-s.dir}}:{{col:c,dir:1}};
-          renderTab(t,currentTf);
-        }});
-      }});
-    }});
+  // Checkbox: event delegation on panel (not per-element) — fixes click bug
+  panel.addEventListener('click', e => {{
+    // Quick buttons
+    const btn=e.target.closest('[data-action]');
+    if(btn && btn.dataset.tab===tabId){{
+      const action=btn.dataset.action;
+      if(action==='default') activeChecks[tabId]=new Set(TAB_DEF[tabId]||[]);
+      else if(action==='all')  activeChecks[tabId]=new Set(TABS[tabId]||[]);
+      else if(action==='none') activeChecks[tabId]=new Set();
+      document.getElementById('cb-'+tabId).innerHTML=buildCbPanel(tabId);
+      buildGroupChart(tabId,currentTf);
+      return;
+    }}
+    // Checkbox labels
+    const lbl=e.target.closest('.cb-label');
+    if(lbl && lbl.dataset.tab===tabId){{
+      e.preventDefault();
+      const t=lbl.dataset.ticker;
+      if(activeChecks[tabId].has(t)) activeChecks[tabId].delete(t);
+      else activeChecks[tabId].add(t);
+      lbl.classList.toggle('checked',activeChecks[tabId].has(t));
+      const cb=lbl.querySelector('input');
+      if(cb) cb.checked=activeChecks[tabId].has(t);
+      buildGroupChart(tabId,currentTf);
+      return;
+    }}
+    // Table sort
+    const th=e.target.closest('th[data-col]');
+    if(th && th.dataset.tab===tabId){{
+      const col=th.dataset.col;
+      const st=sortState[tabId]||{{col:'rank',dir:1}};
+      sortState[tabId]=col===st.col?{{col,dir:-st.dir}}:{{col,dir:1}};
+      const tbl=panel.querySelector('[data-tbl]');
+      if(tbl) tbl.outerHTML=buildTable(ranked(getTabRows(tabId),currentTf),tabId,currentTf);
+      return;
+    }}
   }});
 
-  attachCbListeners(tabId);
   buildGroupChart(tabId,tf);
 }}
 
-// ── Init ─────────────────────────────────────────────────────────
+// ── Init ───────────────────────────────────────────────────────────
 function init(){{
-  // Init activeChecks from defaults
-  Object.keys(TABS).forEach(tabId=>{{
-    activeChecks[tabId]=new Set(TAB_DEF[tabId]||[]);
-  }});
+  Object.keys(TABS).forEach(id=>{{ activeChecks[id]=new Set(TAB_DEF[id]||[]); }});
 
-  // Build panels
   const panels=document.getElementById('panels');
-  Object.keys(TABS).forEach(tabId=>{{
+  Object.keys(TABS).forEach(id=>{{
     const div=document.createElement('div');
-    div.className='tab-panel'+(tabId===currentTab?' active':'');
-    div.id='panel-'+tabId;
+    div.className='tab-panel'+(id===currentTab?' active':'');
+    div.id='panel-'+id;
     panels.appendChild(div);
   }});
 
-  // TF buttons
   document.getElementById('tf-bar').addEventListener('click',e=>{{
-    const btn=e.target.closest('.tf-btn');
-    if(!btn) return;
+    const btn=e.target.closest('.tf-btn'); if(!btn) return;
     currentTf=btn.dataset.tf;
     document.querySelectorAll('.tf-btn').forEach(b=>b.classList.remove('active'));
     btn.classList.add('active');
     renderTab(currentTab,currentTf);
   }});
 
-  // Tab buttons
   document.getElementById('tab-nav').addEventListener('click',e=>{{
-    const btn=e.target.closest('.tab-btn');
-    if(!btn) return;
+    const btn=e.target.closest('.tab-btn'); if(!btn) return;
     currentTab=btn.dataset.tab;
     document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
     btn.classList.add('active');
     document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
     const panel=document.getElementById('panel-'+currentTab);
     panel.classList.add('active');
-    if(!panel.querySelector('canvas')) renderTab(currentTab,currentTf);
-    else buildGroupChart(currentTab,currentTf);
+    renderTab(currentTab,currentTf);
   }});
 
-  // Modal close
   document.getElementById('modal-close').addEventListener('click',closeModal);
-  document.getElementById('modal').addEventListener('click',e=>{{
-    if(e.target===document.getElementById('modal')) closeModal();
-  }});
+  document.getElementById('modal').addEventListener('click',e=>{{ if(e.target.id==='modal') closeModal(); }});
 
   renderTab(currentTab,currentTf);
 }}
 
-// Chart.js date adapter via CDN
-const s=document.createElement('script');
-s.src='https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js';
-s.onload=()=>{{ document.addEventListener('DOMContentLoaded',init); if(document.readyState!=='loading') init(); }};
-document.head.appendChild(s);
+document.addEventListener('DOMContentLoaded',init);
 </script>
 </body>
 </html>"""
@@ -769,10 +751,10 @@ def main():
     print("Connecting to database...")
     engine = create_engine(DB_URL)
     print("Loading data...")
-    instruments, chart_series, as_of = build_data(engine)
+    instruments, chart_series, real_series, rsi_series, as_of = build_data(engine)
     print(f"  {len(instruments)} instruments, as of {as_of}")
     print("Generating HTML...")
-    html = generate_html(instruments, chart_series, as_of, TABS)
+    html = generate_html(instruments, chart_series, real_series, rsi_series, as_of, TABS)
     out = os.path.abspath(args.output)
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, 'w') as f:
