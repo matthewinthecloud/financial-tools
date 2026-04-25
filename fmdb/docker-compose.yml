@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: fmdb-postgres
+    environment:
+      POSTGRES_DB: fmdb
+      POSTGRES_USER: fmdb
+      POSTGRES_PASSWORD: fmdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - fmdb-postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  fmdb-postgres-data:
